@@ -46,15 +46,15 @@ class BankStatementParser(ABC):
     """
 
     def __init__(self, statement_folder: str = "./bank_statements/") -> None:
-        self.transactions: pd.DataFrame
+        self.transactions: pd.DataFrame = pd.DataFrame()
         self.date_range: tuple[datetime, datetime]
         self._recent_bank_statement: Path
         self._bank_statement_folder = statement_folder
-        self._find_statement()
-        self._parse_statement()
+        if self._find_statement():
+            self._parse_statement()
 
     @abstractmethod
-    def _find_statement(self) -> None:
+    def _find_statement(self) -> bool:
         """Method to locate the file and set _recent_bank_statement"""
 
     @abstractmethod
@@ -130,13 +130,13 @@ class IngParser(BankStatementParser):
 
         raise FileNotFoundError("ING bank statement is not found")
 
-    def _find_statement(self) -> None:
+    def _find_statement(self) -> bool:
         """Find latest bank statement .csv in the root folder.
 
         Returns
         -------
-        Path
-            Returns path to file
+        bool
+            Returns False if file is not found and True if it was assigned
         """
         root_path = Path(self._bank_statement_folder)
         csv_files = list(root_path.glob("*.csv"))
@@ -148,5 +148,10 @@ class IngParser(BankStatementParser):
             re.match(file_pattern, file.name) for file in csv_files
         ]
 
+        if not any(file_matches):
+            print("(!)No files matched for the bank statement parser.\n")
+            return False
+
         recent_file = self._find_closest_end_date_file(file_matches)
         self._recent_bank_statement = root_path.joinpath(recent_file)
+        return True
