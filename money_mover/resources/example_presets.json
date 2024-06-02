@@ -1,0 +1,70 @@
+{
+    "example_template": [
+        {
+            "conditions": {
+                "date": "",
+                "name": "",
+                "account": "",
+                "counterparty": "",
+                "code": "",
+                "debit/credit": "",
+                "amount": "",
+                "transaction type": "",
+                "notifications": ""
+            },
+            "label": {
+                "note": "",
+                "category_name": "",
+                "type": ""
+            }
+        }
+    ],
+    "expenses": [
+        {
+            "conditions": {
+                "name": ".*local supermarket",
+                "debit/credit": "Debit"
+            },
+            "label": {
+                "note": "Jumbo groceries",
+                "category_name": "Groceries",
+                "type": "expense"
+            }
+        },
+        {
+            "conditions": {
+                "name": "NETFLIX.*",
+                "debit/credit": "Debit",
+                "amount": "11.99"
+            },
+            "label": {
+                "note": "Netflix subscription",
+                "category_name": "Television",
+                "type": "expense"
+            }
+        },
+        {
+            "conditions": {
+                "name": "NS GROEP.*"
+            },
+            "label": {
+                "note": "NS train subscription",
+                "category_name": "Trains",
+                "type": "expense"
+            }
+        }
+    ],
+    "incomes": [
+        {
+            "conditions": {
+                "name": ".*salary.*",
+                "debit/credit": "Credit"
+            },
+            "label": {
+                "note": "Monthly salary",
+                "category_name": "Salary",
+                "type": "income"
+            }
+        }
+    ]
+}
