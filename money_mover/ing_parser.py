@@ -45,13 +45,25 @@ class BankStatementParser(ABC):
         Start and end dates of the bank statement
     """
 
-    def __init__(self, statement_folder: str = "./bank_statements/") -> None:
+    def __init__(
+        self,
+        statement_folder: str = "./bank_statements/",
+        bank_statement: str | None = None,
+    ) -> None:
         self.transactions: pd.DataFrame = pd.DataFrame()
         self.date_range: tuple[datetime, datetime]
-        self._recent_bank_statement: Path
-        self._bank_statement_folder = statement_folder
-        if self._find_statement():
+        if bank_statement:
+            self._recent_bank_statement = Path(bank_statement)
+            if not self._recent_bank_statement.exists():
+                raise FileNotFoundError(
+                    f"Bank statement file {bank_statement} does not exist."
+                )
             self._parse_statement()
+        else:
+            self._recent_bank_statement: Path | None = None
+            self._bank_statement_folder = statement_folder
+            if self._find_statement():
+                self._parse_statement()
 
     @abstractmethod
     def _find_statement(self) -> bool:
