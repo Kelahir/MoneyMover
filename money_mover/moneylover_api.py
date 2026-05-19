@@ -204,7 +204,7 @@ class MoneyLoverClient:
         }
 
         response = requests.post(
-            url, headers=headers, data=data, json=body, timeout=120
+            url, headers=headers, data=data, json=body, timeout=10
         )
         response.raise_for_status()
 
