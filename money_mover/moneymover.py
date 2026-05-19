@@ -52,13 +52,16 @@ class MoneyMover:
         password: str | None = None,
         bank_statement_folder: str = "./bank_statements/",
         presets_fname: str = "user_presets.json",
+        bank_statement: str | None = None,
     ) -> None:
         script_dir = Path(__file__).resolve().parent
         self._presets_path = script_dir / "resources" / presets_fname
         self.transaction_presets = self._load_presets(self._presets_path)
         self.ml_api = MoneyLoverClient(email, password)
         self._validate_presets()
-        self.bank_statement = IngParser(bank_statement_folder)
+        self.bank_statement = IngParser(
+            bank_statement_folder, bank_statement=bank_statement
+        )
         self.ml_transactions: pd.DataFrame
         self.active_wallet: pd.Series
         self.active_wallet_name: str
