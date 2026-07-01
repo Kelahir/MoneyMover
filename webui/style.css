@@ -18,6 +18,10 @@
   --manual-bg: rgba(245, 165, 36, 0.07);
   --manual-active-bg: rgba(245, 165, 36, 0.13);
 
+  --duplicate: #f2545b;
+  --duplicate-bg: rgba(242, 84, 91, 0.08);
+  --duplicate-active-bg: rgba(242, 84, 91, 0.14);
+
   --radius: 8px;
 }
 
@@ -163,6 +167,20 @@ body {
   background: var(--manual-active-bg);
 }
 
+.tx-row.duplicate .tx-row-main {
+  border-left-color: var(--duplicate);
+  background: var(--duplicate-bg);
+  cursor: pointer;
+}
+
+.tx-row.duplicate.expanded .tx-row-main {
+  background: var(--duplicate-active-bg);
+}
+
+.tx-row.duplicate .tx-row-main:hover {
+  background: var(--duplicate-active-bg);
+}
+
 .tx-note {
   color: var(--text);
   white-space: nowrap;
@@ -202,7 +220,12 @@ body {
   font-size: 10px;
 }
 
-.tx-row.manual.expanded .chevron {
+.tx-row.duplicate .chevron {
+  color: var(--duplicate);
+}
+
+.tx-row.manual.expanded .chevron,
+.tx-row.duplicate.expanded .chevron {
   transform: rotate(90deg);
 }
 
@@ -223,6 +246,10 @@ body {
 
 .dot-manual {
   background: var(--manual);
+}
+
+.dot-duplicate {
+  background: var(--duplicate);
 }
 
 /* Expandable detail panel */
@@ -264,6 +291,16 @@ body {
   font-size: 11px;
   margin: 2px 0 0;
   min-height: 14px;
+}
+
+.duplicate-note {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--duplicate);
+  background: var(--duplicate-bg);
+  border: 1px solid var(--duplicate);
+  border-radius: 6px;
 }
 
 .field.invalid select,

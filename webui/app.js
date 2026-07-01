@@ -50,8 +50,16 @@ function formatAmount(amount) {
   return `${sign}€${Math.abs(amount).toFixed(2)}`;
 }
 
+// Rows in these statuses are foldable/actionable (Type/Category/Note form,
+// Save/Skip) - "manual" needs details filled in from scratch, "duplicate"
+// needs a human decision on whether it's really the same transaction.
+const ACTIONABLE_CLASSES = ["manual", "duplicate"];
+
 function statusInfo(tx) {
   if (tx.origin === "existing") return { cls: "added", label: "Already added" };
+  if (tx.origin === "possible_duplicate" && !tx.filled) {
+    return { cls: "duplicate", label: "Possible duplicate" };
+  }
   if (tx.origin === "preset") return { cls: "autofilled", label: "Autofilled" };
   return tx.filled
     ? { cls: "autofilled", label: "Added" }
@@ -438,7 +446,7 @@ function initManualAdd() {
 // ---------- Screen 4: review recognized categories ----------
 
 function renderReview() {
-  const counts = { existing: 0, preset: 0, manual: 0 };
+  const counts = { existing: 0, preset: 0, manual: 0, possible_duplicate: 0 };
   state.transactions.forEach((t) => counts[t.origin]++);
 
   const filename = state.statement ? state.statement.filename : "the bank statement";
@@ -448,6 +456,7 @@ function renderReview() {
   document.getElementById("review-summary").innerHTML = `
     <span class="summary-chip"><strong>${counts.existing}</strong> already in MoneyLover</span>
     <span class="summary-chip"><strong>${counts.preset}</strong> recognized from presets</span>
+    <span class="summary-chip"><strong>${counts.possible_duplicate}</strong> possible duplicates</span>
     <span class="summary-chip"><strong>${counts.manual}</strong> need manual entry</span>
   `;
 
@@ -512,7 +521,9 @@ function initReview() {
 // ---------- Screen 5: manual entries ----------
 
 function firstManualId() {
-  const first = state.transactions.find((t) => t.origin === "manual" && !t.filled);
+  const first = state.transactions.find(
+    (t) => !t.filled && ACTIONABLE_CLASSES.includes(statusInfo(t).cls)
+  );
   return first ? first.id : null;
 }
 
@@ -526,17 +537,18 @@ function renderEntrySummary() {
     <span class="summary-chip"><strong>${state.transactions.length}</strong> transactions</span>
     <span class="summary-chip"><strong>${counts.added || 0}</strong> already added</span>
     <span class="summary-chip"><strong>${counts.autofilled || 0}</strong> added</span>
+    <span class="summary-chip"><strong>${counts.duplicate || 0}</strong> possible duplicates</span>
     <span class="summary-chip"><strong>${counts.manual || 0}</strong> need review</span>
   `;
 }
 
 function renderEntryRow(tx) {
   const { cls, label } = statusInfo(tx);
-  const isManual = cls === "manual";
-  const isExpanded = isManual && tx.id === state.expandedId;
+  const isActionable = ACTIONABLE_CLASSES.includes(cls);
+  const isExpanded = isActionable && tx.id === state.expandedId;
   const rowClasses = ["tx-row", cls, isExpanded ? "expanded" : ""].join(" ").trim();
 
-  const statusExtra = isManual
+  const statusExtra = isActionable
     ? `<span class="chevron">&#9656;</span>`
     : `<span class="dot dot-${cls}"></span>`;
 
@@ -546,11 +558,17 @@ function renderEntryRow(tx) {
   // with what the category dropdown is actually showing.
   const defaultCategory = tx.category ?? Object.keys(state.categories[tx.type] || {})[0];
 
-  const detail = isManual
+  const duplicateNote =
+    tx.origin === "possible_duplicate" && tx.duplicateDates?.length
+      ? `<p class="duplicate-note">Same amount already recorded on ${tx.duplicateDates.join(", ")}. If that's this transaction, Skip it - otherwise fill this in and add it.</p>`
+      : "";
+
+  const detail = isActionable
     ? `
       <div class="tx-detail">
         <div class="tx-detail-inner">
           <div class="tx-detail-form">
+            ${duplicateNote}
             <div class="tx-detail-row">
               <div class="field">
                 <label>Type</label>
@@ -606,7 +624,7 @@ function renderEntries() {
 
 function advanceToNextManual(currentId) {
   const remaining = state.transactions.filter(
-    (t) => t.origin === "manual" && !t.filled && t.id !== currentId
+    (t) => !t.filled && t.id !== currentId && ACTIONABLE_CLASSES.includes(statusInfo(t).cls)
   );
   state.expandedId = remaining.length ? remaining[0].id : null;
 }
@@ -616,7 +634,7 @@ async function handleEntriesClick(e) {
   if (toggle) {
     const id = Number(toggle.dataset.id);
     const tx = state.transactions.find((t) => t.id === id);
-    if (tx && statusInfo(tx).cls === "manual") {
+    if (tx && ACTIONABLE_CLASSES.includes(statusInfo(tx).cls)) {
       state.expandedId = state.expandedId === id ? null : id;
       renderEntries();
     }

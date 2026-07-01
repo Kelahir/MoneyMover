@@ -65,11 +65,13 @@ def _statement_payload(mover: MoneyMover) -> dict:
     }
 
 
-def _transactions_payload(df: pd.DataFrame) -> list[dict]:
+def _transactions_payload(df: pd.DataFrame, ml_transactions: pd.DataFrame) -> list[dict]:
     records = []
     for position, (_, row) in enumerate(df.iterrows()):
         if row["is_in_ml"]:
             origin = "existing"
+        elif row["is_possible_duplicate"]:
+            origin = "possible_duplicate"
         elif row["has_preset"]:
             origin = "preset"
         else:
@@ -88,6 +90,14 @@ def _transactions_payload(df: pd.DataFrame) -> list[dict]:
         if pd.isna(category):
             category = None
 
+        duplicate_dates = None
+        if origin == "possible_duplicate":
+            # Same amount match, matched against the raw (unsigned) amount
+            # the same way _check_if_already_added does - so the dates
+            # shown are exactly what triggered the flag.
+            matches = ml_transactions[ml_transactions["amount"] == row["amount"]]
+            duplicate_dates = sorted({d.strftime("%Y-%m-%d") for d in matches["date"]})
+
         records.append(
             {
                 "id": position,
@@ -97,6 +107,7 @@ def _transactions_payload(df: pd.DataFrame) -> list[dict]:
                 "category": category,
                 "type": tx_type,
                 "origin": origin,
+                "duplicateDates": duplicate_dates,
             }
         )
     return records
@@ -280,7 +291,7 @@ def review_transactions():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-    return jsonify({"transactions": _transactions_payload(df)})
+    return jsonify({"transactions": _transactions_payload(df, mover.ml_transactions)})
 
 
 @app.post("/api/transactions/insert-recognized")
