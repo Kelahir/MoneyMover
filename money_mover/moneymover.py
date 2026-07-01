@@ -290,7 +290,15 @@ class MoneyMover:
 
         for column, substring in conditions.items():
             transaction_value = str(bank_transaction.get(column, ""))
-            if not re.match(substring, transaction_value, re.IGNORECASE):
+            try:
+                is_match = re.match(substring, transaction_value, re.IGNORECASE)
+            except re.error as e:
+                print(
+                    f"Invalid regex '{substring}' for column '{column}' "
+                    f"in preset {preset['label']}: {e}"
+                )
+                return False
+            if not is_match:
                 return False
 
         return True
@@ -311,15 +319,16 @@ class MoneyMover:
         dict
             All needed kwargs for MoneLover API to add a transaction
         """
+        category = bank_transaction["category_name"]
+
         try:
-            category = bank_transaction["category_name"]
             category_id = self._get_category_id(
                 category_name=category,
                 category_type=bank_transaction["type"],
             )
-        except KeyError as e:
+        except ValueError:
             print(f"{category} is not a valid name for the category")
-            raise KeyError(e) from e
+            raise
 
         return self._create_payload(
             category_id,
