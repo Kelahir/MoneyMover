@@ -98,7 +98,8 @@ class MoneyLoverClient:
         except FileNotFoundError:
             return None
 
-    def _is_token_valid(self, days=5) -> bool:
+    @classmethod
+    def _is_token_valid(cls, days=5) -> bool:
         """Check if the saved token has expired or not.
 
         Parameters
@@ -111,11 +112,48 @@ class MoneyLoverClient:
         bool
             True if the file is older than days passed in the argument.
         """
-        file_modified_time = os.path.getmtime(self.access_token_file)
+        file_modified_time = os.path.getmtime(cls.access_token_file)
         file_modified_datetime = datetime.fromtimestamp(file_modified_time)
         time_passed = datetime.now() - file_modified_datetime
 
         return time_passed < timedelta(days=days)
+
+    @classmethod
+    def has_cached_session(cls) -> bool:
+        """Check without side effects whether a valid access token is cached.
+
+        Lets callers (e.g. the web UI) decide whether to skip the login
+        step without risking a blocking `input()`/`getpass()` prompt from
+        instantiating the client with no credentials and no valid token.
+
+        Returns
+        -------
+        bool
+            True if a non-expired access token file exists.
+        """
+        try:
+            return cls._is_token_valid()
+        except FileNotFoundError:
+            return False
+
+    @classmethod
+    def cached_session_days_left(cls, days: int = 5) -> int | None:
+        """Whole days left before the cached access token expires.
+
+        Returns
+        -------
+        int | None
+            Days remaining (0 if expiring today), or None if there is no
+            valid cached token.
+        """
+        if not cls.has_cached_session():
+            return None
+
+        file_modified_time = os.path.getmtime(cls.access_token_file)
+        elapsed = datetime.now() - datetime.fromtimestamp(file_modified_time)
+        remaining = timedelta(days=days) - elapsed
+
+        return max(0, remaining.days)
 
     def _save_access_token(self, token):
         """Save the token to the file"""

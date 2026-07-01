@@ -10,9 +10,13 @@
   <div class="page">
     <header class="topbar">
       <h1>MoneyMover</h1>
-      <div class="wallet-info" id="wallet-info" hidden>
-        <span class="wallet-name" id="wallet-info-name"></span>
-        <span class="wallet-range" id="wallet-info-range"></span>
+      <div class="topbar-right">
+        <div class="wallet-info" id="wallet-info" hidden>
+          <span class="wallet-name" id="wallet-info-name"></span>
+          <span class="wallet-range" id="wallet-info-range"></span>
+        </div>
+        <button class="btn-link btn-link--inline" id="change-wallet-btn" hidden>Change wallet</button>
+        <button class="btn-link btn-link--inline" id="logout-btn" hidden>Log out</button>
       </div>
     </header>
 
@@ -20,17 +24,31 @@
     <section class="screen active" id="screen-auth">
       <div class="card card-narrow">
         <h2>Connect to MoneyLover</h2>
-        <p class="muted">No saved session found. Enter your MoneyLover credentials to request an access token.</p>
-        <div class="field">
-          <label for="auth-email">E-mail</label>
-          <input type="email" id="auth-email" placeholder="you@example.com" />
+
+        <!-- Shown once /api/auth-status reports a usable method -->
+        <div id="auth-detected" hidden>
+          <p class="muted" id="auth-detected-message"></p>
+          <button class="btn btn-primary btn-block" id="auth-continue">Continue</button>
+          <button class="btn btn-link" id="auth-use-other">Use a different account</button>
         </div>
-        <div class="field">
-          <label for="auth-password">Password</label>
-          <input type="password" id="auth-password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />
+
+        <!-- Manual credentials form -->
+        <div id="auth-manual" hidden>
+          <p class="muted" id="auth-manual-message">Enter your MoneyLover credentials to request an access token.</p>
+          <div class="field">
+            <label for="auth-email">E-mail</label>
+            <input type="email" id="auth-email" placeholder="you@example.com" />
+          </div>
+          <div class="field">
+            <label for="auth-password">Password</label>
+            <input type="password" id="auth-password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />
+          </div>
+          <p class="field-error" id="auth-error" hidden></p>
+          <button class="btn btn-primary btn-block" id="auth-submit">Log in</button>
+          <button class="btn btn-link" id="auth-back" hidden>&larr; Back</button>
         </div>
-        <p class="field-error" id="auth-error" hidden>Enter both an e-mail and a password.</p>
-        <button class="btn btn-primary btn-block" id="auth-submit">Log in</button>
+
+        <p class="muted" id="auth-checking">Checking for a saved session...</p>
       </div>
     </section>
 
@@ -47,10 +65,48 @@
     <section class="screen" id="screen-dashboard">
       <div class="card card-narrow">
         <h2>Load bank statement</h2>
-        <p class="muted" id="dashboard-status">
-          Looking in <code>./bank_statements</code> for the latest ING export.
-        </p>
-        <button class="btn btn-primary btn-block" id="load-file-btn">Load transactions from file</button>
+        <p class="muted" id="dashboard-status">Looking in <code>./bank_statements</code>...</p>
+
+        <button class="btn btn-primary btn-block" id="continue-detected-btn" hidden>
+          Continue with this file
+        </button>
+        <button class="btn btn-secondary btn-block" id="choose-file-btn" hidden>Choose a different file&hellip;</button>
+        <input type="file" id="file-input" accept=".csv" hidden />
+      </div>
+
+      <div class="card card-narrow manual-add-card">
+        <h2>Or add a single transaction</h2>
+        <p class="muted">Useful on its own, and a quick way to test an insert without a full batch.</p>
+
+        <div class="field">
+          <label for="manual-add-date">Date</label>
+          <input type="date" id="manual-add-date" />
+        </div>
+        <div class="field">
+          <label for="manual-add-amount">Amount</label>
+          <input type="number" id="manual-add-amount" min="0" step="0.01" placeholder="0.00" />
+        </div>
+        <div class="field">
+          <label for="manual-add-type">Type</label>
+          <select id="manual-add-type">
+            <option value="expense">Expense</option>
+            <option value="income">Income</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="manual-add-category">Category</label>
+          <select id="manual-add-category"></select>
+        </div>
+        <div class="field">
+          <label for="manual-add-subcategory">Sub-category (optional)</label>
+          <select id="manual-add-subcategory"></select>
+        </div>
+        <div class="field">
+          <label for="manual-add-note">Note / description</label>
+          <input type="text" id="manual-add-note" placeholder="e.g. Dinner with friends" />
+        </div>
+        <p class="field-error" id="manual-add-error" hidden></p>
+        <button class="btn btn-primary btn-block" id="manual-add-submit">Add transaction</button>
       </div>
     </section>
 

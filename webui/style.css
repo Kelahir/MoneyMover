@@ -53,6 +53,12 @@ body {
   letter-spacing: 0.2px;
 }
 
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .wallet-info {
   display: flex;
   flex-direction: column;
@@ -314,15 +320,40 @@ body {
   background: #91a0ff;
 }
 
-.btn-skip {
+.btn-skip,
+.btn-secondary {
   background: transparent;
   color: var(--text-dim);
   border: 1px solid var(--border);
 }
 
-.btn-skip:hover {
+.btn-skip:hover,
+.btn-secondary:hover {
   color: var(--text);
   border-color: var(--text-dim);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 4px 0;
+  display: block;
+  margin: 8px auto 0;
+}
+
+.btn-link--inline {
+  display: inline;
+  margin: 0;
+}
+
+.btn-link:hover {
+  color: var(--accent);
 }
 
 .legend {
@@ -371,6 +402,10 @@ body {
 .card-narrow {
   max-width: 380px;
   margin: 40px auto 0;
+}
+
+.manual-add-card {
+  margin-top: 20px;
 }
 
 .card h2 {

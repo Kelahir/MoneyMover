@@ -59,18 +59,43 @@ class MoneyMover:
         self.transaction_presets = self._load_presets(self._presets_path)
         self.ml_api = MoneyLoverClient(email, password)
         self._validate_presets()
-        self.bank_statement = IngParser(
-            bank_statement_folder, bank_statement=bank_statement
-        )
+        self._bank_statement_folder = bank_statement_folder
+        self.load_bank_statement(bank_statement)
         self.ml_transactions: pd.DataFrame
         self.active_wallet: pd.Series
         self.active_wallet_name: str
         self.active_wallet_id: str
         self.wallet_categories: pd.DataFrame
 
+    def load_bank_statement(self, bank_statement: str | None = None) -> None:
+        """(Re)loads the bank statement, auto-detecting the latest file in
+        the configured folder if no explicit path is given.
+
+        Parameters
+        ----------
+        bank_statement : str, optional
+            Path to a specific statement file, by default None (auto-detect)
+        """
+        self.bank_statement = IngParser(
+            self._bank_statement_folder, bank_statement=bank_statement
+        )
+
     def set_wallet(self) -> None:
         """Choose an active MoneyLover wallet for your next actions."""
-        self.active_wallet = ui.choose_wallet(self.wallets)
+        wallet = ui.choose_wallet(self.wallets)
+        self.select_wallet(wallet["_id"])
+
+    def select_wallet(self, wallet_id: str) -> None:
+        """Sets the active MoneyLover wallet by id, without a CLI prompt.
+
+        Parameters
+        ----------
+        wallet_id : str
+            _id of the wallet, as returned in the `.wallets` DataFrame
+        """
+        self.active_wallet = self.wallets[
+            self.wallets["_id"] == wallet_id
+        ].iloc[0]
         self.active_wallet_name = self.active_wallet["name"]
         self.active_wallet_id = self.active_wallet["_id"]
 
@@ -121,13 +146,80 @@ class MoneyMover:
 
     def print_bank_report(self) -> None:
         """Prints transactions highlighting added and recongnized entries"""
+        ui.print_report(self.get_bank_report())
+
+    def get_bank_report(self) -> pd.DataFrame:
+        """Compares bank statement transactions against MoneyLover records
+        and presets, without any CLI interaction.
+
+        Returns
+        -------
+        pd.DataFrame
+            Bank transactions with "is_in_ml" and "has_preset" columns, plus
+            preset-derived note/category_name/type where matched.
+        """
         self.request_transactions(self.bank_statement.date_range)
         df = self.bank_statement.transactions
 
         df = self._check_if_already_added(df)
         df = self._compare_to_presets(df)
 
-        ui.print_report(df)
+        return df
+
+    def insert_recognized_transactions(self) -> pd.DataFrame:
+        """Adds every preset-matched transaction not already in MoneyLover
+        to the active wallet, without any CLI prompt.
+
+        Returns
+        -------
+        pd.DataFrame
+            The rows that were inserted.
+        """
+        df = self.get_bank_report()
+        to_add = df[~df["is_in_ml"] & df["has_preset"]]
+        self._transfer_from_presets(to_add)
+        return to_add
+
+    def add_manual_transaction(
+        self,
+        amount: float,
+        date: datetime,
+        category_name: str,
+        transaction_type: Literal["expense", "income"],
+        note: str,
+    ) -> dict:
+        """Adds a single transaction to the active wallet, without any CLI
+        prompt. Callers already know the amount/date (e.g. from a bank
+        statement row) and the category/note a user picked.
+
+        Parameters
+        ----------
+        amount : float
+            Signed transaction amount
+        date : datetime
+            Transaction date
+        category_name : str
+            The most specific category picked - a sub-category name if one
+            was chosen, otherwise the parent category name
+        transaction_type : "expense" | "income"
+            Used to disambiguate categories with the same name across types
+        note : str
+            Note to attach to the transaction
+
+        Returns
+        -------
+        dict
+            MoneyLover API response for the created transaction
+        """
+        category_id = self._get_category_id(category_name, transaction_type)
+        payload = {
+            "wallet_id": self.active_wallet_id,
+            "category_id": category_id,
+            "amount": amount,
+            "date": date,
+            "note": note,
+        }
+        return self.ml_api.add_transaction(**payload)
 
     def print_user_presets(self) -> None:
         """Prints user presets from the json file"""

@@ -65,6 +65,11 @@ class BankStatementParser(ABC):
             if self._find_statement():
                 self._parse_statement()
 
+    @property
+    def filename(self) -> str | None:
+        """Name of the loaded statement file, or None if none was found."""
+        return self._recent_bank_statement.name if self._recent_bank_statement else None
+
     @abstractmethod
     def _find_statement(self) -> bool:
         """Method to locate the file and set _recent_bank_statement"""
@@ -100,6 +105,10 @@ class IngParser(BankStatementParser):
         df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
         df["amount"] = df["amount"].str.replace(",", ".").astype("float64")
         self.transactions = df
+        # Derived from the actual data rather than the filename, so this is
+        # also correct for files loaded via an explicit path (e.g. a manual
+        # upload), which don't go through _find_closest_end_date_file.
+        self.date_range = (df["date"].min(), df["date"].max())
 
         return df
 

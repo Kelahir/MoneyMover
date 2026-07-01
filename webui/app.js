@@ -1,52 +1,31 @@
-// Static mock of the full MoneyMover workflow (see example.py / example.ipynb
-// for the equivalent CLI sequence). There is no real backend behind this yet -
-// all "network" steps are simulated with timeouts over in-memory mock data.
-
-const MOCK_WALLETS = [
-  { id: "w1", name: "Main Wallet", balance: 3182.44, currency: "EUR" },
-  { id: "w2", name: "Savings", balance: 12500.0, currency: "EUR" },
-];
-
-// Parent category -> list of sub-categories (empty array = no sub-categories).
-const MOCK_CATEGORIES = {
-  expense: {
-    Groceries: ["Supermarket", "Market", "Bakery"],
-    Rent: [],
-    Transport: ["Public transport", "Fuel", "Parking"],
-    "Eating out": ["Restaurant", "Coffee", "Takeaway"],
-    Utilities: ["Electricity", "Water", "Internet", "Gas"],
-    Health: ["Pharmacy", "Doctor", "Insurance"],
-  },
-  income: {
-    Salary: [],
-    Refund: [],
-    "Other income": ["Gift", "Interest"],
-  },
-};
-
-const STATEMENT_FILE = "NL00INGB0123456789_15-12-2023_31-12-2023.csv";
-const STATEMENT_RANGE = "15 Dec – 31 Dec 2023";
-
-// origin: 'existing' (already in MoneyLover) | 'preset' (recognized) | 'manual' (needs entry)
-const MOCK_TRANSACTIONS = [
-  { id: 1, date: "2023-12-16", note: "Albert Heijn", amount: -34.21, category: "Groceries", type: "expense", origin: "preset" },
-  { id: 2, date: "2023-12-16", note: "NS Groep", amount: -12.4, category: "Transport", type: "expense", origin: "existing" },
-  { id: 3, date: "2023-12-18", note: "Employer B.V.", amount: 2450.0, category: "Salary", type: "income", origin: "existing" },
-  { id: 4, date: "2023-12-19", note: "Unknown card payment XYZ", amount: -18.5, category: null, type: "expense", origin: "manual" },
-  { id: 5, date: "2023-12-20", note: "Vattenfall", amount: -64.0, category: "Utilities", type: "expense", origin: "preset" },
-  { id: 6, date: "2023-12-22", note: "Restaurant De Kroon", amount: -41.9, category: null, type: "expense", origin: "manual" },
-  { id: 7, date: "2023-12-23", note: "Refund - bol.com", amount: 22.99, category: null, type: "income", origin: "manual" },
-  { id: 8, date: "2023-12-27", note: "Albert Heijn", amount: -19.85, category: "Groceries", type: "expense", origin: "preset" },
-];
+// Everything below talks to the real webapp.py/Flask backend, including
+// inserting recognized transactions and manual entries - those are real
+// writes to the user's MoneyLover account.
 
 const state = {
   wallet: null,
-  transactions: MOCK_TRANSACTIONS,
+  statement: null,
+  transactions: [],
   expandedId: null,
+  // { expense: { parentName: [subcategoryNames] }, income: {...} }, loaded
+  // from /api/categories once a wallet is selected.
+  categories: { expense: {}, income: {} },
 };
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function apiFetch(path, options) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error || `Request to ${path} failed (${response.status})`);
+  }
+  return body;
 }
 
 function showLoading(text) {
@@ -61,6 +40,9 @@ function hideLoading() {
 function showScreen(id) {
   document.querySelectorAll(".screen").forEach((el) => el.classList.remove("active"));
   document.getElementById(id).classList.add("active");
+  // Only useful once a wallet has actually been picked, and pointless while
+  // already on the wallet-picking screen itself.
+  document.getElementById("change-wallet-btn").hidden = id === "screen-auth" || id === "screen-wallets";
 }
 
 function formatAmount(amount) {
@@ -77,13 +59,13 @@ function statusInfo(tx) {
 }
 
 function categoryOptions(type, selected) {
-  return Object.keys(MOCK_CATEGORIES[type])
+  return Object.keys(state.categories[type] || {})
     .map((c) => `<option value="${c}" ${c === selected ? "selected" : ""}>${c}</option>`)
     .join("");
 }
 
 function subcategoryOptions(type, category, selected) {
-  const subcategories = MOCK_CATEGORIES[type]?.[category] || [];
+  const subcategories = state.categories[type]?.[category] || [];
   const noneOption = `<option value="" ${!selected ? "selected" : ""}>&mdash; none &mdash;</option>`;
   const options = subcategories
     .map((s) => `<option value="${s}" ${s === selected ? "selected" : ""}>${s}</option>`)
@@ -96,73 +78,361 @@ function categoryDisplay(tx) {
   return tx.subcategory ? `${tx.category} / ${tx.subcategory}` : tx.category;
 }
 
+// ---------- Boot: skip the login screen if a session is already usable ----------
+
+async function boot() {
+  try {
+    const session = await apiFetch("/api/session");
+    if (session.authenticated) {
+      renderWallets(session.wallets);
+      showLoggedInChrome();
+      showScreen("screen-wallets");
+      return;
+    }
+  } catch (e) {
+    console.error("Session check failed:", e);
+  }
+
+  await showAuthOptions();
+}
+
+function showLoggedInChrome() {
+  document.getElementById("logout-btn").hidden = false;
+}
+
+function hideLoggedInChrome() {
+  document.getElementById("logout-btn").hidden = true;
+  document.getElementById("wallet-info").hidden = true;
+}
+
+function initLogout() {
+  document.getElementById("logout-btn").addEventListener("click", async () => {
+    try {
+      await apiFetch("/api/logout", { method: "POST" });
+    } catch (e) {
+      console.error("Logout failed:", e);
+    }
+
+    state.wallet = null;
+    state.statement = null;
+    state.transactions = [];
+    state.expandedId = null;
+
+    hideLoggedInChrome();
+    document.getElementById("auth-checking").hidden = false;
+    showScreen("screen-auth");
+    await showAuthOptions();
+  });
+}
+
+function initChangeWallet() {
+  document.getElementById("change-wallet-btn").addEventListener("click", () => {
+    // Re-render from the wallet list already fetched at login - one call
+    // for wallet info per session is enough, no need to hit the API again
+    // just to go back and pick a different wallet.
+    state.statement = null;
+    state.transactions = [];
+    state.expandedId = null;
+
+    renderWallets(state.wallets);
+    showScreen("screen-wallets");
+  });
+}
+
 // ---------- Screen 1: auth ----------
+
+async function showAuthOptions() {
+  const checkingEl = document.getElementById("auth-checking");
+  const detectedEl = document.getElementById("auth-detected");
+  const manualEl = document.getElementById("auth-manual");
+
+  let status;
+  try {
+    status = await apiFetch("/api/auth-status");
+  } catch (e) {
+    status = { method: "none" };
+  }
+  checkingEl.hidden = true;
+
+  if (status.method === "none") {
+    detectedEl.hidden = true;
+    manualEl.hidden = false;
+    document.getElementById("auth-back").hidden = true;
+    return;
+  }
+
+  const message =
+    status.method === "token"
+      ? `A previous session was found (valid for ${status.days_left} more day${status.days_left === 1 ? "" : "s"}).`
+      : `Credentials found in .env for ${status.email}.`;
+
+  document.getElementById("auth-detected-message").textContent = message;
+  detectedEl.hidden = false;
+  manualEl.hidden = true;
+}
 
 function initAuth() {
   const emailEl = document.getElementById("auth-email");
   const passwordEl = document.getElementById("auth-password");
   const errorEl = document.getElementById("auth-error");
 
-  document.getElementById("auth-submit").addEventListener("click", async () => {
+  async function attemptLogin(body) {
+    errorEl.hidden = true;
+    showLoading("Requesting access token...");
+    try {
+      const data = await apiFetch("/api/login", { method: "POST", body: JSON.stringify(body) });
+      hideLoading();
+      renderWallets(data.wallets);
+      showLoggedInChrome();
+      showScreen("screen-wallets");
+    } catch (e) {
+      hideLoading();
+      errorEl.textContent = e.message;
+      errorEl.hidden = false;
+    }
+  }
+
+  document.getElementById("auth-continue").addEventListener("click", () => attemptLogin({}));
+
+  document.getElementById("auth-use-other").addEventListener("click", () => {
+    document.getElementById("auth-detected").hidden = true;
+    document.getElementById("auth-manual").hidden = false;
+    document.getElementById("auth-back").hidden = false;
+  });
+
+  document.getElementById("auth-back").addEventListener("click", () => {
+    document.getElementById("auth-manual").hidden = true;
+    document.getElementById("auth-detected").hidden = false;
+  });
+
+  document.getElementById("auth-submit").addEventListener("click", () => {
     if (!emailEl.value.trim() || !passwordEl.value.trim()) {
+      errorEl.textContent = "Enter both an e-mail and a password.";
       errorEl.hidden = false;
       return;
     }
-    errorEl.hidden = true;
-
-    showLoading("Requesting access token...");
-    await wait(700);
-    hideLoading();
-
-    renderWallets();
-    showScreen("screen-wallets");
+    attemptLogin({ email: emailEl.value.trim(), password: passwordEl.value });
   });
 }
 
 // ---------- Screen 2: wallets ----------
 
-function renderWallets() {
+function renderWallets(wallets) {
+  state.wallets = wallets;
   const list = document.getElementById("wallet-list");
-  list.innerHTML = MOCK_WALLETS.map(
-    (w) => `
-      <div class="wallet-card" data-id="${w.id}">
+  list.innerHTML = wallets
+    .map(
+      (w) => `
+      <div class="wallet-card" data-id="${w._id}">
         <span class="wallet-card-name">${w.name}</span>
-        <span class="wallet-card-balance"><strong>${w.balance.toFixed(2)}</strong> ${w.currency}</span>
+        <span class="wallet-card-balance"><strong>${Number(w.balance).toFixed(2)}</strong> ${w.currency}</span>
       </div>`
-  ).join("");
+    )
+    .join("");
 
   list.querySelectorAll(".wallet-card").forEach((card) => {
-    card.addEventListener("click", () => {
-      state.wallet = MOCK_WALLETS.find((w) => w.id === card.dataset.id);
+    card.addEventListener("click", async () => {
+      try {
+        const data = await apiFetch("/api/wallets/select", {
+          method: "POST",
+          body: JSON.stringify({ wallet_id: card.dataset.id }),
+        });
 
-      const info = document.getElementById("wallet-info");
-      info.hidden = false;
-      document.getElementById("wallet-info-name").textContent = state.wallet.name;
-      document.getElementById("wallet-info-range").textContent = "No bank statement loaded yet";
+        state.wallet = { id: data.wallet_id, name: data.wallet_name };
 
-      showScreen("screen-dashboard");
+        const info = document.getElementById("wallet-info");
+        info.hidden = false;
+        document.getElementById("wallet-info-name").textContent = data.wallet_name;
+        document.getElementById("wallet-info-range").textContent = "No bank statement loaded yet";
+
+        apiFetch("/api/categories")
+          .then((categories) => {
+            state.categories = categories;
+            refreshManualAddCategories();
+          })
+          .catch((err) => console.error("Failed to load categories:", err));
+
+        showScreen("screen-dashboard");
+        loadStatementInfo();
+      } catch (e) {
+        alert(e.message);
+      }
     });
   });
 }
 
 // ---------- Screen 3: load from file ----------
 
-function initDashboard() {
-  document.getElementById("load-file-btn").addEventListener("click", async () => {
-    showLoading(`Scanning ./bank_statements for the latest ING export...`);
-    await wait(800);
+function formatDateRange([start, end]) {
+  // Parse "YYYY-MM-DD" as local calendar date components, not UTC - passing
+  // the string straight to `new Date()` parses it as UTC midnight, which
+  // then shifts a day off when formatted back in a negative-offset timezone.
+  const fmt = (str) => {
+    const [year, month, day] = str.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
+  return `${fmt(start)} – ${fmt(end)}`;
+}
 
-    document.getElementById("dashboard-status").innerHTML =
-      `Found <code>${STATEMENT_FILE}</code> (${STATEMENT_RANGE})`;
-    document.getElementById("wallet-info-range").textContent = STATEMENT_RANGE;
+function applyStatementInfo(data) {
+  const statusEl = document.getElementById("dashboard-status");
+  const continueBtn = document.getElementById("continue-detected-btn");
 
-    showLoading("Matching transactions against your presets...");
-    await wait(700);
+  if (data.found) {
+    state.statement = { filename: data.filename, rangeText: formatDateRange(data.date_range) };
+    statusEl.innerHTML = `Found <code>${data.filename}</code> (${state.statement.rangeText})`;
+    document.getElementById("wallet-info-range").textContent = state.statement.rangeText;
+    continueBtn.hidden = false;
+  } else {
+    state.statement = null;
+    statusEl.textContent = "No bank statement found automatically in ./bank_statements.";
+    continueBtn.hidden = true;
+  }
+}
+
+async function loadStatementInfo() {
+  const statusEl = document.getElementById("dashboard-status");
+  document.getElementById("continue-detected-btn").hidden = true;
+  document.getElementById("choose-file-btn").hidden = true;
+  statusEl.textContent = "Looking in ./bank_statements...";
+
+  try {
+    const data = await apiFetch("/api/statement");
+    applyStatementInfo(data);
+  } catch (e) {
+    state.statement = null;
+    statusEl.textContent = e.message;
+  }
+
+  document.getElementById("choose-file-btn").hidden = false;
+}
+
+async function proceedToReview() {
+  showLoading("Matching transactions against your presets...");
+  try {
+    const data = await apiFetch("/api/transactions/review");
+    state.transactions = data.transactions;
+  } catch (e) {
     hideLoading();
+    alert(e.message);
+    return;
+  }
+  hideLoading();
 
-    renderReview();
-    showScreen("screen-review");
+  renderReview();
+  showScreen("screen-review");
+}
+
+function initDashboard() {
+  document.getElementById("continue-detected-btn").addEventListener("click", proceedToReview);
+
+  document.getElementById("choose-file-btn").addEventListener("click", () => {
+    document.getElementById("file-input").click();
   });
+
+  document.getElementById("file-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    showLoading(`Uploading ${file.name}...`);
+    try {
+      const response = await fetch("/api/statement/upload", { method: "POST", body: formData });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Upload failed.");
+      hideLoading();
+      applyStatementInfo(data);
+    } catch (err) {
+      hideLoading();
+      alert(err.message);
+    }
+  });
+}
+
+// ---------- Dashboard: add a single transaction manually ----------
+// Same /api/transactions/manual endpoint the entries screen uses - handy
+// both as a standalone feature and for testing an insert without a batch.
+
+function refreshManualAddCategories() {
+  const typeEl = document.getElementById("manual-add-type");
+  const categoryEl = document.getElementById("manual-add-category");
+  const subcategoryEl = document.getElementById("manual-add-subcategory");
+
+  const type = typeEl.value;
+  const defaultCategory = Object.keys(state.categories[type] || {})[0];
+  categoryEl.innerHTML = categoryOptions(type, defaultCategory);
+  subcategoryEl.innerHTML = subcategoryOptions(type, categoryEl.value, null);
+}
+
+async function submitManualAdd() {
+  const dateEl = document.getElementById("manual-add-date");
+  const amountEl = document.getElementById("manual-add-amount");
+  const typeEl = document.getElementById("manual-add-type");
+  const categoryEl = document.getElementById("manual-add-category");
+  const subcategoryEl = document.getElementById("manual-add-subcategory");
+  const noteEl = document.getElementById("manual-add-note");
+  const errorEl = document.getElementById("manual-add-error");
+
+  const date = dateEl.value;
+  const amountValue = parseFloat(amountEl.value);
+  const note = noteEl.value.trim();
+
+  if (!date || !(amountValue > 0) || !note) {
+    errorEl.textContent = "Date, a positive amount, and a note are all required.";
+    errorEl.hidden = false;
+    return;
+  }
+  errorEl.hidden = true;
+
+  const type = typeEl.value;
+  const signedAmount = type === "expense" ? -amountValue : amountValue;
+
+  showLoading("Adding transaction to MoneyLover...");
+  try {
+    await apiFetch("/api/transactions/manual", {
+      method: "POST",
+      body: JSON.stringify({
+        date,
+        amount: signedAmount,
+        type,
+        category: categoryEl.value,
+        subcategory: subcategoryEl.value || null,
+        note,
+      }),
+    });
+  } catch (e) {
+    hideLoading();
+    errorEl.textContent = e.message;
+    errorEl.hidden = false;
+    return;
+  }
+  hideLoading();
+
+  amountEl.value = "";
+  noteEl.value = "";
+  noteEl.focus();
+}
+
+function initManualAdd() {
+  document.getElementById("manual-add-date").value = new Date().toISOString().slice(0, 10);
+  refreshManualAddCategories();
+
+  document.getElementById("manual-add-type").addEventListener("change", refreshManualAddCategories);
+
+  document.getElementById("manual-add-category").addEventListener("change", () => {
+    const type = document.getElementById("manual-add-type").value;
+    const category = document.getElementById("manual-add-category").value;
+    document.getElementById("manual-add-subcategory").innerHTML = subcategoryOptions(type, category, null);
+  });
+
+  document.getElementById("manual-add-submit").addEventListener("click", submitManualAdd);
 }
 
 // ---------- Screen 4: review recognized categories ----------
@@ -171,8 +441,9 @@ function renderReview() {
   const counts = { existing: 0, preset: 0, manual: 0 };
   state.transactions.forEach((t) => counts[t.origin]++);
 
+  const filename = state.statement ? state.statement.filename : "the bank statement";
   document.getElementById("review-subtitle").textContent =
-    `${state.transactions.length} transactions found in ${STATEMENT_FILE}.`;
+    `${state.transactions.length} transactions found in ${filename}.`;
 
   document.getElementById("review-summary").innerHTML = `
     <span class="summary-chip"><strong>${counts.existing}</strong> already in MoneyLover</span>
@@ -204,15 +475,37 @@ function renderReview() {
       : "Continue to manual entries";
 }
 
+async function goToEntries() {
+  state.expandedId = firstManualId();
+  renderEntries();
+  showScreen("screen-entries");
+}
+
 function initReview() {
   document.getElementById("confirm-insert-btn").addEventListener("click", async () => {
-    showLoading("Adding recognized transactions to MoneyLover...");
-    await wait(900);
+    const presetCount = state.transactions.filter((t) => t.origin === "preset").length;
+
+    if (presetCount === 0) {
+      await goToEntries();
+      return;
+    }
+
+    showLoading(`Adding ${presetCount} recognized transaction${presetCount === 1 ? "" : "s"} to MoneyLover...`);
+    try {
+      await apiFetch("/api/transactions/insert-recognized", { method: "POST" });
+      // Re-fetch rather than patch locally - the insert re-runs the
+      // is_in_ml comparison server-side, so this is the source of truth
+      // for what's actually in MoneyLover now.
+      const data = await apiFetch("/api/transactions/review");
+      state.transactions = data.transactions;
+    } catch (e) {
+      hideLoading();
+      alert(e.message);
+      return;
+    }
     hideLoading();
 
-    state.expandedId = firstManualId();
-    renderEntries();
-    showScreen("screen-entries");
+    await goToEntries();
   });
 }
 
@@ -251,7 +544,7 @@ function renderEntryRow(tx) {
   // so resolve the effective category up front and use it consistently for
   // both dropdowns - otherwise the sub-category list can start out of sync
   // with what the category dropdown is actually showing.
-  const defaultCategory = tx.category ?? Object.keys(MOCK_CATEGORIES[tx.type])[0];
+  const defaultCategory = tx.category ?? Object.keys(state.categories[tx.type] || {})[0];
 
   const detail = isManual
     ? `
@@ -318,7 +611,7 @@ function advanceToNextManual(currentId) {
   state.expandedId = remaining.length ? remaining[0].id : null;
 }
 
-function handleEntriesClick(e) {
+async function handleEntriesClick(e) {
   const toggle = e.target.closest('[data-role="toggle"]');
   if (toggle) {
     const id = Number(toggle.dataset.id);
@@ -358,9 +651,33 @@ function handleEntriesClick(e) {
     const categorySelect = document.querySelector(`select[data-role="category"][data-id="${id}"]`);
     const subcategorySelect = document.querySelector(`select[data-role="subcategory"][data-id="${id}"]`);
 
-    tx.type = typeSelect.value;
-    tx.category = categorySelect.value;
-    tx.subcategory = subcategorySelect.value || null;
+    const type = typeSelect.value;
+    const category = categorySelect.value;
+    const subcategory = subcategorySelect.value || null;
+
+    showLoading("Adding transaction to MoneyLover...");
+    try {
+      await apiFetch("/api/transactions/manual", {
+        method: "POST",
+        body: JSON.stringify({
+          date: tx.date,
+          amount: tx.amount,
+          type,
+          category,
+          subcategory,
+          note,
+        }),
+      });
+    } catch (err) {
+      hideLoading();
+      alert(err.message);
+      return;
+    }
+    hideLoading();
+
+    tx.type = type;
+    tx.category = category;
+    tx.subcategory = subcategory;
     tx.note = note;
     tx.filled = true;
 
@@ -392,6 +709,10 @@ function handleEntriesChange(e) {
 
 initAuth();
 initDashboard();
+initManualAdd();
 initReview();
+initLogout();
+initChangeWallet();
 document.getElementById("tx-list").addEventListener("click", handleEntriesClick);
 document.getElementById("tx-list").addEventListener("change", handleEntriesChange);
+boot();
