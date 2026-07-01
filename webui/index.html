@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MoneyMover</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <h1>MoneyMover</h1>
+      <div class="wallet-info" id="wallet-info" hidden>
+        <span class="wallet-name" id="wallet-info-name"></span>
+        <span class="wallet-range" id="wallet-info-range"></span>
+      </div>
+    </header>
+
+    <!-- 1. Authorization -->
+    <section class="screen active" id="screen-auth">
+      <div class="card card-narrow">
+        <h2>Connect to MoneyLover</h2>
+        <p class="muted">No saved session found. Enter your MoneyLover credentials to request an access token.</p>
+        <div class="field">
+          <label for="auth-email">E-mail</label>
+          <input type="email" id="auth-email" placeholder="you@example.com" />
+        </div>
+        <div class="field">
+          <label for="auth-password">Password</label>
+          <input type="password" id="auth-password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />
+        </div>
+        <p class="field-error" id="auth-error" hidden>Enter both an e-mail and a password.</p>
+        <button class="btn btn-primary btn-block" id="auth-submit">Log in</button>
+      </div>
+    </section>
+
+    <!-- 2. Wallet overview -->
+    <section class="screen" id="screen-wallets">
+      <div class="card">
+        <h2>Your wallets</h2>
+        <p class="muted">Select a wallet to work with for this session.</p>
+        <div class="wallet-list" id="wallet-list"></div>
+      </div>
+    </section>
+
+    <!-- 3. Dashboard / load transactions from file -->
+    <section class="screen" id="screen-dashboard">
+      <div class="card card-narrow">
+        <h2>Load bank statement</h2>
+        <p class="muted" id="dashboard-status">
+          Looking in <code>./bank_statements</code> for the latest ING export.
+        </p>
+        <button class="btn btn-primary btn-block" id="load-file-btn">Load transactions from file</button>
+      </div>
+    </section>
+
+    <!-- 4. Recognized categories + confirm -->
+    <section class="screen" id="screen-review">
+      <div class="card">
+        <h2>Recognized transactions</h2>
+        <p class="muted" id="review-subtitle"></p>
+
+        <div class="summary" id="review-summary"></div>
+
+        <div class="tx-table" id="review-table">
+          <div class="tx-table-head tx-table-head--review">
+            <span>Date</span>
+            <span>Note</span>
+            <span>Amount</span>
+            <span>Category</span>
+            <span class="col-status">Status</span>
+          </div>
+          <div class="tx-table-body" id="review-list"></div>
+        </div>
+
+        <div class="review-actions">
+          <button class="btn btn-primary" id="confirm-insert-btn">Confirm &amp; insert recognized transactions</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Remaining manual entries -->
+    <section class="screen" id="screen-entries">
+      <div class="summary" id="summary"></div>
+
+      <main class="tx-table" id="tx-table">
+        <div class="tx-table-head">
+          <span>Date</span>
+          <span>Note</span>
+          <span>Amount</span>
+          <span>Category</span>
+          <span class="col-status">Status</span>
+        </div>
+        <div class="tx-table-body" id="tx-list"></div>
+      </main>
+
+      <footer class="legend">
+        <span class="legend-item"><i class="dot dot-added"></i> Already in MoneyLover</span>
+        <span class="legend-item"><i class="dot dot-autofilled"></i> Added</span>
+        <span class="legend-item"><i class="dot dot-manual"></i> Needs manual entry</span>
+      </footer>
+    </section>
+
+    <!-- Shared loading overlay -->
+    <div class="loading-overlay" id="loading-overlay" hidden>
+      <div class="spinner"></div>
+      <span id="loading-text">Working...</span>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
