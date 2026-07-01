@@ -98,9 +98,20 @@ class MoneyLoverClient:
         except FileNotFoundError:
             return None
 
-    @classmethod
-    def _is_token_valid(cls, days=5) -> bool:
+    @staticmethod
+    def _time_since_saved(path) -> timedelta:
+        """Time elapsed since the file at `path` was last written."""
+        file_modified_time = os.path.getmtime(path)
+        return datetime.now() - datetime.fromtimestamp(file_modified_time)
+
+    def _is_token_valid(self, days=5) -> bool:
         """Check if the saved token has expired or not.
+
+        Instance method (not a classmethod) so tests can override
+        `self.access_token_file` per-instance without affecting the class.
+        `has_cached_session`/`cached_session_days_left` below need to work
+        without an instance, so they use `_time_since_saved` directly
+        against `cls.access_token_file` instead of going through this.
 
         Parameters
         ----------
@@ -112,11 +123,7 @@ class MoneyLoverClient:
         bool
             True if the file is older than days passed in the argument.
         """
-        file_modified_time = os.path.getmtime(cls.access_token_file)
-        file_modified_datetime = datetime.fromtimestamp(file_modified_time)
-        time_passed = datetime.now() - file_modified_datetime
-
-        return time_passed < timedelta(days=days)
+        return self._time_since_saved(self.access_token_file) < timedelta(days=days)
 
     @classmethod
     def has_cached_session(cls) -> bool:
@@ -132,7 +139,7 @@ class MoneyLoverClient:
             True if a non-expired access token file exists.
         """
         try:
-            return cls._is_token_valid()
+            return cls._time_since_saved(cls.access_token_file) < timedelta(days=5)
         except FileNotFoundError:
             return False
 
@@ -149,8 +156,7 @@ class MoneyLoverClient:
         if not cls.has_cached_session():
             return None
 
-        file_modified_time = os.path.getmtime(cls.access_token_file)
-        elapsed = datetime.now() - datetime.fromtimestamp(file_modified_time)
+        elapsed = cls._time_since_saved(cls.access_token_file)
         remaining = timedelta(days=days) - elapsed
 
         return max(0, remaining.days)

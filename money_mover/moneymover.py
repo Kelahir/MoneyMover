@@ -10,9 +10,6 @@ import pandas as pd
 
 from .ing_parser import IngParser
 from .moneylover_api import MoneyLoverClient
-from .prompts import CategorySelector, UserPrompts
-
-ui = UserPrompts()
 
 
 class MoneyMover:
@@ -80,11 +77,6 @@ class MoneyMover:
             self._bank_statement_folder, bank_statement=bank_statement
         )
 
-    def set_wallet(self) -> None:
-        """Choose an active MoneyLover wallet for your next actions."""
-        wallet = ui.choose_wallet(self.wallets)
-        self.select_wallet(wallet["_id"])
-
     def select_wallet(self, wallet_id: str) -> None:
         """Sets the active MoneyLover wallet by id, without a CLI prompt.
 
@@ -144,10 +136,6 @@ class MoneyMover:
         self.ml_transactions = self._format_transactions(raw_transactions)
         return self.ml_transactions
 
-    def print_bank_report(self) -> None:
-        """Prints transactions highlighting added and recongnized entries"""
-        ui.print_report(self.get_bank_report())
-
     def get_bank_report(self) -> pd.DataFrame:
         """Compares bank statement transactions against MoneyLover records
         and presets, without any CLI interaction.
@@ -170,14 +158,20 @@ class MoneyMover:
         """Adds every preset-matched transaction not already in MoneyLover
         to the active wallet, without any CLI prompt.
 
+        Possible duplicates are excluded even if they also match a preset -
+        an ambiguous match should never be auto-inserted, since that's
+        exactly the case that risks creating a real duplicate.
+
         Returns
         -------
         pd.DataFrame
             The rows that were inserted.
         """
         df = self.get_bank_report()
-        to_add = df[~df["is_in_ml"] & df["has_preset"]]
-        self._transfer_from_presets(to_add)
+        to_add = df[
+            ~df["is_in_ml"] & ~df["is_possible_duplicate"] & df["has_preset"]
+        ]
+        self.transfer_from_presets(to_add)
         return to_add
 
     def add_manual_transaction(
@@ -221,62 +215,22 @@ class MoneyMover:
         }
         return self.ml_api.add_transaction(**payload)
 
-    def print_user_presets(self) -> None:
-        """Prints user presets from the json file"""
-        df = self._load_presets_into_df()
-
-        print(df)
-
-    def display_categories(
-        self, transaction_type: Literal["expense", "income"]
-    ) -> None:
-        """Shows categories for the selected wallet"""
-
-        transaction_mask = self.wallet_categories["type"] == transaction_type
-        wallet_categories = self.wallet_categories[transaction_mask]
-        CategorySelector(wallet_categories).run()
-
-    def transfer_bank_transactions(self) -> pd.DataFrame:
-        """Transfers transactions from the latest ing bank statement to the
-        MoneyLover wallet based on a predefined template. If the transaction is
-        already added it is skipped (checked by transaction amount).
-
-        Parameters
-        ----------
-        wallet_name : str
-            Name of the target wallet in the MoneyLover
-
-        Returns
-        -------
-        pd.DataFrame
-            Transactions which were not transferred from the file and require
-            manual entry.
-        """
-        self.request_transactions(self.bank_statement.date_range)
-        tr_df = self.bank_statement.transactions
-        tr_df = self._check_if_already_added(tr_df)
-        tr_df = self._compare_to_presets(tr_df)
-
-        transactions_to_add = tr_df[~tr_df["is_in_ml"] & tr_df["has_preset"]]
-
-        if ui.prompt_adding(transactions_to_add):
-            self._transfer_from_presets(transactions_to_add)
-
-        remaining = tr_df[~(tr_df["is_in_ml"] | tr_df["has_preset"])]
-
-        if ui.promt_manual_entry(remaining):
-            for idx, transaction in remaining.iterrows():
-                self._fill_manually(idx, transaction)
-
-        return remaining
-
     def _check_if_already_added(
         self, bank_transactions: pd.DataFrame
     ) -> pd.DataFrame:
         """Compares transactions in the wallet and bank statement.
 
-        The comparison is done by date and value. If they match, they are
-        considered already added.
+        A bank transaction is only considered already added if a single
+        MoneyLover transaction matches it on both date and amount together
+        ("is_in_ml"). Matching the two independently (some MoneyLover
+        transaction has this amount, and some other one has this date) isn't
+        enough to call it a duplicate, but it's still worth flagging for a
+        human to check ("is_possible_duplicate") rather than silently
+        letting an automatic insert risk creating a real duplicate.
+
+        ml_transactions is already scoped to the bank statement's date
+        range (see get_bank_report), so no extra date window is needed for
+        the possible-duplicate check.
 
         Parameters
         ----------
@@ -286,23 +240,30 @@ class MoneyMover:
         Returns
         -------
         DataFrame
-            Same table with boolean column "is_in_ml". True if exists in ML.
+            Same table with boolean columns "is_in_ml" (exact date+amount
+            match) and "is_possible_duplicate" (amount matches something in
+            the period, but not paired with this date - needs review).
         """
 
         if self.ml_transactions.empty:
             bank_transactions["is_in_ml"] = False
+            bank_transactions["is_possible_duplicate"] = False
             return bank_transactions
+
+        ml_pairs = pd.MultiIndex.from_frame(
+            self.ml_transactions[["amount", "date"]]
+        )
+        bank_pairs = pd.MultiIndex.from_frame(
+            bank_transactions[["amount", "date"]]
+        )
+        is_in_ml = bank_pairs.isin(ml_pairs)
 
         is_same_amount = bank_transactions["amount"].isin(
             self.ml_transactions["amount"]
         )
-        is_same_date = bank_transactions["date"].isin(
-            self.ml_transactions["date"]
-        )
-
-        is_in_ml = is_same_amount & is_same_date
 
         bank_transactions["is_in_ml"] = is_in_ml
+        bank_transactions["is_possible_duplicate"] = is_same_amount & ~is_in_ml
 
         return bank_transactions
 
@@ -336,11 +297,14 @@ class MoneyMover:
 
         return transactions_df
 
-    def _transfer_from_presets(self, transactions_df: pd.DataFrame) -> None:
+    def transfer_from_presets(self, transactions_df: pd.DataFrame) -> None:
         """Populates a MoneLover wallet with transactions from the Dataframe.
 
         Uses a dictionary presets to assign categories and notes to
-        popular and known expenses/incomes.
+        popular and known expenses/incomes. Public since it's also called
+        directly by MoneyMoverCLI (which already has the bank report
+        fetched and shouldn't have to trigger another fetch just to reuse
+        insert_recognized_transactions()).
 
         Parameters
         ----------
@@ -468,33 +432,6 @@ class MoneyMover:
             )
         return category_id.iloc[0]["_id"]
 
-    def _fill_manually(self, id_num: int, bank_transaction: pd.Series):
-        """Provides CLI for manually entering the transactions"""
-        # categories_df = self.ml_api.categories
-        categories_df = self.wallet_categories
-
-        transaction_type = ui.choose_transaction_type(id_num, bank_transaction)
-        if transaction_type is None:
-            return
-        transaction_mask = categories_df["type"] == transaction_type
-        # & (categories_df["wallet_id"] == self.active_wallet_id)
-        # wallet_categories = categories_df[transaction_mask]
-        applicable_categories = categories_df[transaction_mask]
-        category = ui.choose_category(applicable_categories)
-
-        if category is None:
-            return
-
-        category_id = self._get_category_id(
-            category,
-            transaction_type,
-        )
-
-        note = input("Write a transaction note: ")
-        payload = self._create_payload(category_id, bank_transaction, note)
-        self.ml_api.add_transaction(**payload)
-        print("Transaction added\n")
-
     def _format_transactions(self, response: dict) -> pd.DataFrame:
         """Formats the raw transactions response from MoneLover to retrieve
         the information like note, summ, date and category.
@@ -564,8 +501,9 @@ class MoneyMover:
         ]
         return normalized_data
 
-    def _load_presets_into_df(self) -> pd.DataFrame:
-        """Loads preset file into a multiindex dataframe"""
+    def load_presets_into_df(self) -> pd.DataFrame:
+        """Loads preset file into a multiindex dataframe. Public since
+        MoneyMoverCLI's print_user_presets() also needs it."""
         template = self._load_presets(self._presets_path, ["example_template"])
         preferred_order = self._flatten_for_dataframe(template)
         preferred_order = list(preferred_order[0].keys())
@@ -583,7 +521,7 @@ class MoneyMover:
 
     def _validate_presets(self) -> bool:
         """Checks that user presets use valid categories"""
-        df = self._load_presets_into_df()
+        df = self.load_presets_into_df()
 
         valid_mask = df["label", "category_name"].isin(
             self.ml_api.categories["name"]

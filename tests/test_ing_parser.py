@@ -20,7 +20,7 @@ def fixture_ing_parser():
 
 def test_find_file(ing_parser):
     """Test file search in the folder"""
-    ing_parser._find_file()
+    ing_parser._find_statement()
     assert ing_parser._recent_bank_statement.exists()
 
 
@@ -43,8 +43,8 @@ def test_find_closest_end_date_file(ing_parser):
 
 def test_parse_csv(ing_parser):
     """Test that the values are parsed as expected"""
-    ing_parser._find_file()
-    df = ing_parser._parse_csv()
+    ing_parser._find_statement()
+    df = ing_parser._parse_statement()
 
     # Check if DataFrame is not empty
     assert not df.empty
