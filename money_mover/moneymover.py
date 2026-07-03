@@ -189,7 +189,11 @@ class MoneyMover:
         Parameters
         ----------
         amount : float
-            Signed transaction amount
+            Transaction amount - sign doesn't matter, the magnitude is what
+            gets sent. MoneyLover derives the direction from the category's
+            expense/income type, and rejects a signed amount with
+            "sync_error_data_invalid" (confirmed via the web UI, where
+            amounts were being negated for expenses before this).
         date : datetime
             Transaction date
         category_name : str
@@ -209,7 +213,7 @@ class MoneyMover:
         payload = {
             "wallet_id": self.active_wallet_id,
             "category_id": category_id,
-            "amount": amount,
+            "amount": abs(amount),
             "date": date,
             "note": note,
         }
