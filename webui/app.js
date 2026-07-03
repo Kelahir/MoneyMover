@@ -56,6 +56,7 @@ function formatAmount(amount) {
 const ACTIONABLE_CLASSES = ["manual", "duplicate"];
 
 function statusInfo(tx) {
+  if (tx.origin === "flagged") return { cls: "flagged", label: "Added - verify" };
   if (tx.origin === "existing") return { cls: "added", label: "Already added" };
   if (tx.origin === "possible_duplicate" && !tx.filled) {
     return { cls: "duplicate", label: "Possible duplicate" };
@@ -537,6 +538,7 @@ function renderEntrySummary() {
     <span class="summary-chip"><strong>${state.transactions.length}</strong> transactions</span>
     <span class="summary-chip"><strong>${counts.added || 0}</strong> already added</span>
     <span class="summary-chip"><strong>${counts.autofilled || 0}</strong> added</span>
+    <span class="summary-chip"><strong>${counts.flagged || 0}</strong> added - please verify</span>
     <span class="summary-chip"><strong>${counts.duplicate || 0}</strong> possible duplicates</span>
     <span class="summary-chip"><strong>${counts.manual || 0}</strong> need review</span>
   `;
@@ -561,6 +563,14 @@ function renderEntryRow(tx) {
   const duplicateNote =
     tx.origin === "possible_duplicate" && tx.duplicateDates?.length
       ? `<p class="duplicate-note">Same amount already recorded on ${tx.duplicateDates.join(", ")}. If that's this transaction, Skip it - otherwise fill this in and add it.</p>`
+      : "";
+
+  // Flagged rows were already auto-inserted (they matched a preset) - no
+  // action to take, but the note stays visible (not folded) so the "please
+  // double-check this" context isn't hidden behind an extra click.
+  const flaggedNote =
+    tx.origin === "flagged" && tx.duplicateDates?.length
+      ? `<p class="duplicate-note tx-flagged-note">Added automatically, but the same amount is also recorded on ${tx.duplicateDates.join(", ")} - worth double-checking this isn't a duplicate.</p>`
       : "";
 
   const detail = isActionable
@@ -602,7 +612,7 @@ function renderEntryRow(tx) {
           </div>
         </div>
       </div>`
-    : "";
+    : flaggedNote;
 
   return `
     <div class="${rowClasses}" data-id="${tx.id}">
@@ -645,7 +655,6 @@ async function handleEntriesClick(e) {
   if (!action) return;
 
   const id = Number(action.dataset.id);
-  const tx = state.transactions.find((t) => t.id === id);
 
   if (action.dataset.action === "skip") {
     advanceToNextManual(id);
@@ -654,54 +663,68 @@ async function handleEntriesClick(e) {
   }
 
   if (action.dataset.action === "save") {
-    const noteInput = document.querySelector(`input[data-role="note"][data-id="${id}"]`);
-    const noteError = document.querySelector(`p[data-role="note-error"][data-id="${id}"]`);
-    const noteField = document.querySelector(`div[data-role="note-field"][data-id="${id}"]`);
-    const note = noteInput.value.trim();
-
-    if (!note) {
-      noteError.hidden = false;
-      noteField.classList.add("invalid");
-      return;
-    }
-
-    const typeSelect = document.querySelector(`select[data-role="type"][data-id="${id}"]`);
-    const categorySelect = document.querySelector(`select[data-role="category"][data-id="${id}"]`);
-    const subcategorySelect = document.querySelector(`select[data-role="subcategory"][data-id="${id}"]`);
-
-    const type = typeSelect.value;
-    const category = categorySelect.value;
-    const subcategory = subcategorySelect.value || null;
-
-    showLoading("Adding transaction to MoneyLover...");
-    try {
-      await apiFetch("/api/transactions/manual", {
-        method: "POST",
-        body: JSON.stringify({
-          date: tx.date,
-          amount: tx.amount,
-          type,
-          category,
-          subcategory,
-          note,
-        }),
-      });
-    } catch (err) {
-      hideLoading();
-      alert(err.message);
-      return;
-    }
-    hideLoading();
-
-    tx.type = type;
-    tx.category = category;
-    tx.subcategory = subcategory;
-    tx.note = note;
-    tx.filled = true;
-
-    advanceToNextManual(id);
-    renderEntries();
+    await saveManualEntry(id);
   }
+}
+
+async function saveManualEntry(id) {
+  const tx = state.transactions.find((t) => t.id === id);
+  const noteInput = document.querySelector(`input[data-role="note"][data-id="${id}"]`);
+  const noteError = document.querySelector(`p[data-role="note-error"][data-id="${id}"]`);
+  const noteField = document.querySelector(`div[data-role="note-field"][data-id="${id}"]`);
+  const note = noteInput.value.trim();
+
+  if (!note) {
+    noteError.hidden = false;
+    noteField.classList.add("invalid");
+    return;
+  }
+
+  const typeSelect = document.querySelector(`select[data-role="type"][data-id="${id}"]`);
+  const categorySelect = document.querySelector(`select[data-role="category"][data-id="${id}"]`);
+  const subcategorySelect = document.querySelector(`select[data-role="subcategory"][data-id="${id}"]`);
+
+  const type = typeSelect.value;
+  const category = categorySelect.value;
+  const subcategory = subcategorySelect.value || null;
+
+  showLoading("Adding transaction to MoneyLover...");
+  try {
+    await apiFetch("/api/transactions/manual", {
+      method: "POST",
+      body: JSON.stringify({
+        date: tx.date,
+        amount: tx.amount,
+        type,
+        category,
+        subcategory,
+        note,
+      }),
+    });
+  } catch (err) {
+    hideLoading();
+    alert(err.message);
+    return;
+  }
+  hideLoading();
+
+  tx.type = type;
+  tx.category = category;
+  tx.subcategory = subcategory;
+  tx.note = note;
+  tx.filled = true;
+
+  advanceToNextManual(id);
+  renderEntries();
+}
+
+function handleEntriesKeydown(e) {
+  if (e.key !== "Enter") return;
+  const noteInput = e.target.closest('input[data-role="note"]');
+  if (!noteInput) return;
+
+  e.preventDefault();
+  saveManualEntry(Number(noteInput.dataset.id));
 }
 
 // Cascades type -> category -> sub-category without a full re-render, so an
@@ -733,4 +756,5 @@ initLogout();
 initChangeWallet();
 document.getElementById("tx-list").addEventListener("click", handleEntriesClick);
 document.getElementById("tx-list").addEventListener("change", handleEntriesChange);
+document.getElementById("tx-list").addEventListener("keydown", handleEntriesKeydown);
 boot();

@@ -25,7 +25,17 @@ ENV_PATH = Path(__file__).resolve().parent / ".env"
 
 app = Flask(__name__, static_folder=str(WEBUI_DIR), static_url_path="")
 
-_session = {"mover": None}
+# flagged_duplicates: keys identifying transactions that were auto-inserted
+# despite being a possible duplicate (matched by amount only, not date), so
+# the next /api/transactions/review can keep marking them for the user to
+# double-check instead of showing them as an indistinguishable normal
+# "already in MoneyLover" row. Reset whenever the context changes (new
+# login, wallet, or statement) so stale flags don't leak into unrelated data.
+_session = {"mover": None, "flagged_duplicates": set()}
+
+
+def _duplicate_key(row) -> tuple:
+    return (row["date"].strftime("%Y-%m-%d"), row["name"], round(row["amount"], 2))
 
 
 def _env_credentials() -> tuple[str | None, str | None]:
@@ -65,10 +75,19 @@ def _statement_payload(mover: MoneyMover) -> dict:
     }
 
 
-def _transactions_payload(df: pd.DataFrame, ml_transactions: pd.DataFrame) -> list[dict]:
+def _transactions_payload(
+    df: pd.DataFrame,
+    ml_transactions: pd.DataFrame,
+    flagged_duplicates: set = frozenset(),
+) -> list[dict]:
     records = []
     for position, (_, row) in enumerate(df.iterrows()):
-        if row["is_in_ml"]:
+        if row["is_in_ml"] and _duplicate_key(row) in flagged_duplicates:
+            # Auto-inserted despite being a possible duplicate (it matched a
+            # preset) - now genuinely "in ML" (it matches itself), but still
+            # worth flagging so the user notices and double-checks it.
+            origin = "flagged"
+        elif row["is_in_ml"]:
             origin = "existing"
         elif row["is_possible_duplicate"]:
             origin = "possible_duplicate"
@@ -91,7 +110,7 @@ def _transactions_payload(df: pd.DataFrame, ml_transactions: pd.DataFrame) -> li
             category = None
 
         duplicate_dates = None
-        if origin == "possible_duplicate":
+        if origin in ("possible_duplicate", "flagged"):
             # Same amount match, matched against the raw (unsigned) amount
             # the same way _check_if_already_added does - so the dates
             # shown are exactly what triggered the flag.
@@ -200,6 +219,7 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 401
 
+    _session["flagged_duplicates"] = set()
     return jsonify({"wallets": _wallets_payload(_session["mover"])})
 
 
@@ -218,6 +238,8 @@ def select_wallet():
         mover.select_wallet(wallet_id)
     except IndexError:
         return jsonify({"error": f"No wallet with id {wallet_id}"}), 404
+
+    _session["flagged_duplicates"] = set()
 
     return jsonify(
         {"wallet_name": mover.active_wallet_name, "wallet_id": mover.active_wallet_id}
@@ -271,6 +293,7 @@ def upload_statement():
     except Exception as e:
         return jsonify({"error": f"Could not parse {filename}: {e}"}), 400
 
+    _session["flagged_duplicates"] = set()
     return jsonify(_statement_payload(mover))
 
 
@@ -291,7 +314,13 @@ def review_transactions():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-    return jsonify({"transactions": _transactions_payload(df, mover.ml_transactions)})
+    return jsonify(
+        {
+            "transactions": _transactions_payload(
+                df, mover.ml_transactions, _session["flagged_duplicates"]
+            )
+        }
+    )
 
 
 @app.post("/api/transactions/insert-recognized")
@@ -299,6 +328,11 @@ def insert_recognized():
     """Writes every preset-matched, not-yet-in-MoneyLover transaction to the
     active wallet. This is a real write - it creates actual records in the
     user's MoneyLover account.
+
+    Includes possible duplicates that also match a preset, rather than
+    skipping them - they're tracked in flagged_duplicates so the next
+    review fetch can still mark them for the user to double-check instead
+    of showing them as an indistinguishable normal "already added" row.
     """
     mover = _session["mover"]
     if mover is None:
@@ -309,7 +343,12 @@ def insert_recognized():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-    return jsonify({"inserted": len(inserted)})
+    flagged = inserted[inserted["is_possible_duplicate"]]
+    _session["flagged_duplicates"] = {
+        _duplicate_key(row) for _, row in flagged.iterrows()
+    }
+
+    return jsonify({"inserted": len(inserted), "flagged": len(flagged)})
 
 
 @app.post("/api/transactions/manual")

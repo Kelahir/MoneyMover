@@ -158,9 +158,11 @@ class MoneyMover:
         """Adds every preset-matched transaction not already in MoneyLover
         to the active wallet, without any CLI prompt.
 
-        Possible duplicates are excluded even if they also match a preset -
-        an ambiguous match should never be auto-inserted, since that's
-        exactly the case that risks creating a real duplicate.
+        Possible duplicates (matched by amount only, not date) are included
+        if they also match a preset - callers should flag these for the
+        user to double-check afterward rather than skip them, since the
+        "is_possible_duplicate" column on the returned DataFrame says which
+        rows those were.
 
         Returns
         -------
@@ -168,9 +170,7 @@ class MoneyMover:
             The rows that were inserted.
         """
         df = self.get_bank_report()
-        to_add = df[
-            ~df["is_in_ml"] & ~df["is_possible_duplicate"] & df["has_preset"]
-        ]
+        to_add = df[~df["is_in_ml"] & df["has_preset"]]
         self.transfer_from_presets(to_add)
         return to_add
 

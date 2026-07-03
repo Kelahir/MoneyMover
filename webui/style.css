@@ -148,6 +148,11 @@ body {
   opacity: 0.7;
 }
 
+.tx-row.flagged .tx-row-main {
+  border-left-color: var(--duplicate);
+  background: var(--duplicate-bg);
+}
+
 .tx-row.autofilled .tx-row-main {
   border-left-color: var(--autofilled);
   background: var(--autofilled-bg);
@@ -248,7 +253,8 @@ body {
   background: var(--manual);
 }
 
-.dot-duplicate {
+.dot-duplicate,
+.dot-flagged {
   background: var(--duplicate);
 }
 
@@ -301,6 +307,10 @@ body {
   background: var(--duplicate-bg);
   border: 1px solid var(--duplicate);
   border-radius: 6px;
+}
+
+.tx-flagged-note {
+  margin: 0 16px 12px 19px;
 }
 
 .field.invalid select,
