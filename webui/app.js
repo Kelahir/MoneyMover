@@ -446,9 +446,18 @@ function initManualAdd() {
 
 // ---------- Screen 4: review recognized categories ----------
 
+// insert_recognized_transactions() (backend) inserts anything with a preset
+// match, including possible_duplicate rows that also happen to match one -
+// those aren't skipped, just flagged for later review. So "will this be
+// auto-inserted" isn't just origin === "preset".
+function willBeAutoInserted(tx) {
+  return tx.origin === "preset" || (tx.origin === "possible_duplicate" && tx.hasPreset);
+}
+
 function renderReview() {
   const counts = { existing: 0, preset: 0, manual: 0, possible_duplicate: 0 };
   state.transactions.forEach((t) => counts[t.origin]++);
+  const autoInsertCount = state.transactions.filter(willBeAutoInserted).length;
 
   const filename = state.statement ? state.statement.filename : "the bank statement";
   document.getElementById("review-subtitle").textContent =
@@ -478,10 +487,9 @@ function renderReview() {
     .join("");
 
   const confirmBtn = document.getElementById("confirm-insert-btn");
-  const presetCount = counts.preset;
   confirmBtn.textContent =
-    presetCount > 0
-      ? `Confirm & insert ${presetCount} recognized transaction${presetCount === 1 ? "" : "s"}`
+    autoInsertCount > 0
+      ? `Confirm & insert ${autoInsertCount} recognized transaction${autoInsertCount === 1 ? "" : "s"}`
       : "Continue to manual entries";
 }
 
@@ -493,14 +501,14 @@ async function goToEntries() {
 
 function initReview() {
   document.getElementById("confirm-insert-btn").addEventListener("click", async () => {
-    const presetCount = state.transactions.filter((t) => t.origin === "preset").length;
+    const autoInsertCount = state.transactions.filter(willBeAutoInserted).length;
 
-    if (presetCount === 0) {
+    if (autoInsertCount === 0) {
       await goToEntries();
       return;
     }
 
-    showLoading(`Adding ${presetCount} recognized transaction${presetCount === 1 ? "" : "s"} to MoneyLover...`);
+    showLoading(`Adding ${autoInsertCount} recognized transaction${autoInsertCount === 1 ? "" : "s"} to MoneyLover...`);
     try {
       await apiFetch("/api/transactions/insert-recognized", { method: "POST" });
       // Re-fetch rather than patch locally - the insert re-runs the

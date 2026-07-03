@@ -127,6 +127,11 @@ def _transactions_payload(
                 "type": tx_type,
                 "origin": origin,
                 "duplicateDates": duplicate_dates,
+                # A possible_duplicate row can still have a preset match -
+                # insert_recognized_transactions() inserts those too. The
+                # frontend needs this to know which "possible_duplicate"
+                # rows will actually get auto-inserted vs. need manual entry.
+                "hasPreset": bool(row["has_preset"]),
             }
         )
     return records
