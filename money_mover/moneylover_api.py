@@ -4,7 +4,8 @@ Moneylover API client to communicate with the server, send and retrieve data.
 The client requires logging-in to acquire a token, which then can be reused
 foe 5-7 days before expiration.
 
-Wallet categories are cached for quicker access.
+Transaction categories are shared by all wallets and read from a
+local file.
 """
 
 import getpass
@@ -20,7 +21,7 @@ class MoneyLoverClient:
     """MoneyLover api client. Log in using MoneyLover account credentials.
 
     On instance creation it logs in, saves the
-    access token, retrieves existing wallets and expense categories.
+    access token, retrieves existing wallets and loads categories.
 
     Parameters
     ----------
@@ -35,7 +36,7 @@ class MoneyLoverClient:
         Table with wallets
 
     categories : DataFrame
-        Table with categories for every wallet
+        Table with categories, shared by all wallets
 
     Public methods
     --------------
@@ -49,7 +50,7 @@ class MoneyLoverClient:
         Balance and currency for every existing wallet
 
     load_categories()
-        Updates a file with transaction categories and wallets
+        Loads transaction categories from the local file
 
     get_transactions()
         Returns records in a wallet between two dates
@@ -234,7 +235,7 @@ class MoneyLoverClient:
         body : dict, optional
             Request payload, by default None
         data : dict, optional
-            Payload as data, used to get categories, by default None
+            Payload as form data, by default None
 
         Returns
         -------
@@ -314,60 +315,19 @@ class MoneyLoverClient:
 
         return self.wallets
 
-    def load_categories(self, reload: bool = False) -> None:
-        """There are a lot of categories and it takes time to load them.
-        So this method retrives them once and saves them to a file.
+    def load_categories(self) -> None:
+        """Loads transaction categories from the local categories file.
 
-        Parameters
-        ----------
-        reload : bool, optional
-            Pass a True to forcefully update the categories, by default False
+        Categories (and their _ids) are shared by all wallets. The MoneyLover
+        endpoint that used to list them no longer works, so the file is
+        maintained by hand. Columns: type, name, _id, parent.
         """
-        types = {0: "debt/loan", 1: "income", 2: "expense"}
-
-        if self.categories_file.exists() and not reload:
-            self.categories = pd.read_csv(self.categories_file)
-        else:
-            all_categories = pd.DataFrame()
-            for _, wallet in self.wallets.iterrows():
-                wallet_categories = pd.DataFrame(
-                    self._get_wallet_categories(wallet["_id"])
-                )
-                wallet_categories["wallet_id"] = wallet["_id"]
-                wallet_categories["wallet_name"] = wallet["name"]
-
-                # replace numeric type with a string
-                wallet_categories.replace({"type": types}, inplace=True)
-
-                all_categories = pd.concat([all_categories, wallet_categories])
-
-            self.categories = all_categories[
-                ["wallet_id", "wallet_name", "type", "name", "_id", "parent"]
-            ]
-            self.categories.to_csv(self.categories_file)
-
-    def _get_wallet_categories(self, wallet_id: str) -> list[dict]:
-        """Retrieves wallet expense and income categories.
-
-        Parameters
-        ----------
-        wallet_id : str
-            Wallet _id as a string
-
-        Returns
-        -------
-        list[dict]
-            List of available categories for a wallet with _id, name, etc.
-        """
-        categories = self._post_request(
-            path="/category/list",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={"walletId": wallet_id},
-        )
-        if isinstance(categories, list):
-            return categories
-
-        raise ReturnedTypeError()
+        if not self.categories_file.exists():
+            raise FileNotFoundError(
+                f"Categories file not found: {self.categories_file}. Create it"
+                " with columns: type, name, _id, parent."
+            )
+        self.categories = pd.read_csv(self.categories_file)
 
     def get_transactions(
         self,

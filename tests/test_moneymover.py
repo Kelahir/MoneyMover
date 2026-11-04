@@ -4,12 +4,8 @@ Builds MoneyMover instances via `__new__`, bypassing `__init__` (which logs
 in for real), so these run fast and offline. Only attributes a given test
 actually needs are set by hand.
 
-Deliberately NOT covered here: _get_category_id, select_wallet's category
-filtering, add_manual_transaction, transfer_from_presets,
-insert_recognized_transactions, get_bank_report. All of these depend on the
-current wallet-scoped category structure, which is being restructured (see
-.claude/review_notes.md) - tests written against it now would just need
-rewriting once that lands.
+Not covered here: add_manual_transaction, transfer_from_presets,
+insert_recognized_transactions, get_bank_report - they call the API.
 """
 
 # pylint: disable=W0212
@@ -193,3 +189,38 @@ class TestValidatePresets:
     def test_missing_category_fails(self, mover):
         mover.ml_api.categories = pd.DataFrame({"name": ["Groceries"]})
         assert mover._validate_presets() is False
+
+
+class TestCategories:
+    """Categories are shared by all wallets - lookups ignore the wallet."""
+
+    @pytest.fixture(autouse=True)
+    def categories(self, mover):
+        mover.ml_api.categories = pd.DataFrame(
+            {
+                "type": ["expense", "income", "expense"],
+                "name": ["Others", "Others", "Groceries"],
+                "_id": ["exp-others", "inc-others", "groceries"],
+                "parent": [None, None, "exp-others"],
+            }
+        )
+        mover.ml_api.wallets = pd.DataFrame(
+            {"_id": ["wallet-1", "wallet-2"], "name": ["Main", "Cash"]}
+        )
+
+    def test_get_category_id_disambiguates_by_type(self, mover):
+        assert mover._get_category_id("Others", "expense") == "exp-others"
+        assert mover._get_category_id("Others", "income") == "inc-others"
+
+    def test_get_category_id_same_for_any_wallet(self, mover):
+        mover.active_wallet_id = "wallet-2"
+        assert mover._get_category_id("Groceries", "expense") == "groceries"
+
+    def test_get_category_id_unknown_raises(self, mover):
+        with pytest.raises(ValueError):
+            mover._get_category_id("Groceries", "income")
+
+    def test_select_wallet_uses_shared_categories(self, mover):
+        mover.select_wallet("wallet-2")
+        assert mover.active_wallet_name == "Cash"
+        assert mover.wallet_categories.equals(mover.ml_api.categories)

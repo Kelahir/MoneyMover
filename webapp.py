@@ -142,7 +142,7 @@ def _categories_payload(mover: MoneyMover) -> dict:
     matching the shape the frontend's category/sub-category dropdowns expect.
     Debt/loan categories are skipped - the UI only offers expense/income.
     """
-    df = mover.wallet_categories.drop_duplicates("name")
+    df = mover.wallet_categories.drop_duplicates(["type", "name"])
     result: dict[str, dict[str, list[str]]] = {}
 
     for tx_type in ("expense", "income"):

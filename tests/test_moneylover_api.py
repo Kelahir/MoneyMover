@@ -144,14 +144,12 @@ def test_get_wallets_summary(ml_client):
 
 def test_load_categories(ml_client):
     """Check category retrieval"""
-    ml_client.load_categories(True)
+    ml_client.load_categories()
     assert ml_client.categories_file.exists()
 
     assert all(
         key in ml_client.categories
         for key in [
-            "wallet_id",
-            "wallet_name",
             "type",
             "name",
             "_id",

@@ -91,8 +91,8 @@ class MoneyMover:
         self.active_wallet_name = self.active_wallet["name"]
         self.active_wallet_id = self.active_wallet["_id"]
 
-        mask = self.ml_api.categories["wallet_id"] == self.active_wallet_id
-        self.wallet_categories = self.ml_api.categories[mask]
+        # Categories are shared by all wallets
+        self.wallet_categories = self.ml_api.categories
 
     @property
     def wallets(self) -> pd.DataFrame:
@@ -408,12 +408,15 @@ class MoneyMover:
         return payload
 
     def _get_category_id(self, category_name: str, category_type: str) -> str:
-        """Return a corresponding category id from a cached categories file.
+        """Return a corresponding category id from the categories table.
+        Category ids are the same for every wallet.
 
         Parameters
         ----------
         category_name : str
             Name of the MoneyLover category for the transaction
+        category_type : str
+            "expense" or "income", as names can repeat across types
 
         Returns
         -------
@@ -421,12 +424,11 @@ class MoneyMover:
             Unique category _id
         """
 
-        df = pd.read_csv(self.ml_api.categories_file)
-        wallet_filter = df["wallet_id"] == self.active_wallet_id
+        df = self.ml_api.categories
         category_filter = df["name"] == category_name
         type_filter = df["type"] == category_type
 
-        category_id = df[wallet_filter & category_filter & type_filter]
+        category_id = df[category_filter & type_filter]
         if category_id.empty:
             raise ValueError(f"No matching category found for {category_name}")
         if category_id["_id"].size > 1:

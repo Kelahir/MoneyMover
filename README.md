@@ -25,6 +25,8 @@ Import both classes with `from money_mover import MoneyMover, MoneyMoverCLI`, cr
 - Pass them in plain text as arguments to the class (Not recommended).
 
 After the log in, the script will request a token, which is valid for 5 days. You don't need to enter your credentials every time. Token is stored in `./money_mover/resources/access_token.txt`.
+
+Transaction categories are shared by all wallets and read from `./money_mover/resources/categories.csv` (columns: `type`, `name`, `_id`, `parent`). The MoneyLover API no longer lists categories, so this file is maintained by hand: `parent` holds the `_id` of the parent category and is empty for top-level categories.
 ### 2. Display wallet info
 Now you can display your MoneyLover data:
 - `ml.wallets` attribute returns your wallet summary
