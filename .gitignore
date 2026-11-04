@@ -162,7 +162,7 @@ cython_debug/
 # Project specific
 bank_statements/*
 money_mover/resources/access_token.txt
-money_mover/resources/categories.csv
+money_mover/resources/categories*.csv
 money_mover/resources/user_presets.json
 
 # Claude Code local tooling config
